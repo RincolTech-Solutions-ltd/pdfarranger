@@ -11,6 +11,9 @@ set -e
 REPO="https://github.com/RincolTech-Solutions-ltd/pdfarranger.git"
 INSTALL_DIR="$HOME/pdfarranger"
 LAUNCHER="/usr/local/bin/pdfarranger"
+LOCAL_LAUNCHER="$HOME/.local/bin/pdfarranger"
+APPS="$HOME/.local/share/applications"
+ICONS="$HOME/.local/share/icons/hicolor"
 
 echo ""
 echo "======================================================"
@@ -31,7 +34,7 @@ detect_distro() {
 DISTRO=$(detect_distro)
 
 # ── Install system dependencies ────────────────────────────────────────────────
-echo "[1/4] Installing system dependencies for: $DISTRO"
+echo "[1/5] Installing system dependencies for: $DISTRO"
 
 case "$DISTRO" in
     ubuntu|linuxmint|debian|pop|elementary|zorin)
@@ -59,10 +62,8 @@ case "$DISTRO" in
             python3-Pillow git
         ;;
     *)
-        echo ""
         echo "WARNING: Distro '$DISTRO' not recognised."
         echo "Attempting to continue — install GTK3 + python3-gi manually if this fails."
-        echo ""
         ;;
 esac
 
@@ -70,20 +71,19 @@ echo ""
 
 # ── Clone or update repo ───────────────────────────────────────────────────────
 if [ -d "$INSTALL_DIR/.git" ]; then
-    echo "[2/4] Updating existing installation at $INSTALL_DIR"
+    echo "[2/5] Updating existing installation at $INSTALL_DIR"
     git -C "$INSTALL_DIR" pull --ff-only
 else
-    echo "[2/4] Cloning repository to $INSTALL_DIR"
+    echo "[2/5] Cloning repository to $INSTALL_DIR"
     git clone "$REPO" "$INSTALL_DIR"
 fi
 
 echo ""
 
 # ── Install Python package ─────────────────────────────────────────────────────
-echo "[3/4] Installing Python package"
+echo "[3/5] Installing Python package"
 cd "$INSTALL_DIR"
 
-# Try editable install; fall back if pip complains about system-managed env
 if pip install --user --break-system-packages -e ".[pikepdf]" 2>/dev/null; then
     true
 elif pip install --user -e ".[pikepdf]" 2>/dev/null; then
@@ -96,8 +96,8 @@ fi
 
 echo ""
 
-# ── Create launcher ────────────────────────────────────────────────────────────
-echo "[4/4] Creating launcher at $LAUNCHER"
+# ── Create launchers ───────────────────────────────────────────────────────────
+echo "[4/5] Creating launchers"
 
 if [ "$VENV_INSTALL" = true ]; then
     LAUNCH_CMD="\"$INSTALL_DIR/venv/bin/python3\" -m pdfarranger \"\$@\""
@@ -105,19 +105,69 @@ else
     LAUNCH_CMD="python3 -m pdfarranger \"\$@\""
 fi
 
+# /usr/local/bin launcher (system-wide)
 sudo tee "$LAUNCHER" > /dev/null <<LAUNCHEOF
 #!/bin/bash
 cd "$INSTALL_DIR" && $LAUNCH_CMD
 LAUNCHEOF
-
 sudo chmod +x "$LAUNCHER"
+
+# ~/.local/bin launcher (pip may have created one — fix it to cd first)
+mkdir -p "$HOME/.local/bin"
+cat > "$LOCAL_LAUNCHER" <<LAUNCHEOF
+#!/bin/bash
+cd "$INSTALL_DIR" && $LAUNCH_CMD
+LAUNCHEOF
+chmod +x "$LOCAL_LAUNCHER"
+
+echo ""
+
+# ── Install desktop entry and icons ───────────────────────────────────────────
+echo "[5/5] Installing desktop entry and icons"
+
+# Icons
+for size in 16x16 32x32 48x48 256x256; do
+    mkdir -p "$ICONS/$size/apps"
+    cp "$INSTALL_DIR/data/icons/hicolor/$size/apps/com.github.jeromerobert.pdfarranger.png" \
+       "$ICONS/$size/apps/" 2>/dev/null || true
+done
+mkdir -p "$ICONS/scalable/apps"
+cp "$INSTALL_DIR/data/icons/hicolor/scalable/apps/com.github.jeromerobert.pdfarranger.svg" \
+   "$ICONS/scalable/apps/" 2>/dev/null || true
+
+# Desktop entry
+mkdir -p "$APPS"
+cat > "$APPS/pdfarranger.desktop" <<DESKTOPEOF
+[Desktop Entry]
+Version=1.0
+Name=PDF Arranger
+Comment=Merge, split, rearrange and sign PDF pages
+Type=Application
+Exec=pdfarranger %U
+Icon=com.github.jeromerobert.pdfarranger
+MimeType=application/pdf;
+Categories=Office;
+Terminal=false
+StartupNotify=true
+Keywords=pdf;sign;merge;split;arrange;
+
+[Desktop Action new-window]
+Name=New Window
+Exec=pdfarranger
+DESKTOPEOF
+
+# Refresh caches
+gtk-update-icon-cache -f -t "$ICONS" 2>/dev/null || true
+update-desktop-database "$APPS" 2>/dev/null || true
 
 echo ""
 echo "======================================================"
 echo "  Installation complete!"
 echo ""
-echo "  Run the app:     pdfarranger"
-echo "  Update anytime:  cd $INSTALL_DIR && git pull"
-echo "  Source:          https://github.com/RincolTech-Solutions-ltd/pdfarranger"
+echo "  Launch from terminal:  pdfarranger"
+echo "  Find in app menu:      search 'PDF Arranger'"
+echo "  Pin to panel:          right-click app in menu -> Add to Panel"
+echo "  Update anytime:        cd ~/pdfarranger && git pull"
+echo "  Source:                https://github.com/RincolTech-Solutions-ltd/pdfarranger"
 echo "======================================================"
 echo ""
