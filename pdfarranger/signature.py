@@ -366,15 +366,29 @@ class SignatureDialog(Gtk.Dialog):
         choose_lbl.set_halign(Gtk.Align.CENTER)
         vbox.pack_start(choose_lbl, False, False, 0)
 
+        # CSS: blue border on selected variant frame
+        css_provider = Gtk.CssProvider()
+        css_provider.load_from_data(b"""
+            .variant-frame { border: 3px solid transparent; border-radius: 8px; padding: 2px; }
+            .variant-frame.selected { border: 3px solid #1A73E8; border-radius: 8px; }
+        """)
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(), css_provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+
         thumbs = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=20)
         thumbs.set_halign(Gtk.Align.CENTER)
         thumbs.set_vexpand(True)
 
-        self._var_btns = []
-        self._var_imgs = []
+        self._var_btns   = []
+        self._var_imgs   = []
+        self._var_frames = []
+        self._var_labels = []
         first = None
         for i, caption in enumerate(["Original", "Transparent A", "Transparent B"]):
             col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+
             btn = Gtk.RadioButton.new_from_widget(first)
             if first is None:
                 first = btn
@@ -384,20 +398,45 @@ class SignatureDialog(Gtk.Dialog):
             img_w.set_size_request(190, 130)
             btn.add(img_w)
             btn.connect("toggled", self._on_variant_toggled, i)
-            col.pack_start(btn, False, False, 0)
-            lbl_cap = Gtk.Label(label=caption)
+
+            # Wrap button in a frame that gets a blue border when selected
+            frame = Gtk.Frame()
+            frame.set_shadow_type(Gtk.ShadowType.NONE)
+            frame.get_style_context().add_class("variant-frame")
+            frame.add(btn)
+
+            lbl_cap = Gtk.Label()
+            lbl_cap.set_markup(caption)
+
+            col.pack_start(frame, False, False, 0)
             col.pack_start(lbl_cap, False, False, 0)
             thumbs.pack_start(col, False, False, 0)
+
             self._var_btns.append(btn)
             self._var_imgs.append(img_w)
+            self._var_frames.append(frame)
+            self._var_labels.append((lbl_cap, caption))
 
         self._var_btns[self._selected_variant].set_active(True)
+        self._refresh_variant_selection()
         vbox.pack_start(thumbs, True, True, 0)
         return vbox
+
+    def _refresh_variant_selection(self):
+        for i, (frame, (lbl, caption)) in enumerate(
+                zip(self._var_frames, self._var_labels)):
+            if i == self._selected_variant:
+                frame.get_style_context().add_class("selected")
+                lbl.set_markup(
+                    f'<b><span foreground="#1A73E8">✓  {caption}</span></b>')
+            else:
+                frame.get_style_context().remove_class("selected")
+                lbl.set_markup(caption)
 
     def _on_variant_toggled(self, btn, idx):
         if btn.get_active():
             self._selected_variant = idx
+            self._refresh_variant_selection()
 
     def _on_file_set(self, chooser):
         path = chooser.get_filename()
@@ -414,6 +453,7 @@ class SignatureDialog(Gtk.Dialog):
             self._var_imgs[i].set_from_pixbuf(_pil_to_pixbuf(img, 190, 130))
         self._var_btns[1].set_active(True)
         self._selected_variant = 1
+        self._refresh_variant_selection()
 
     def _get_upload_image(self):
         return self._upload_variants[self._selected_variant]
