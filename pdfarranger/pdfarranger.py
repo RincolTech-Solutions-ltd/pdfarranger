@@ -176,6 +176,7 @@ from . import exporter
 from . import metadata
 from . import pageutils
 from . import splitter
+from . import signature as sig_mod
 from .search import SearchBarWidget
 from .iconview import CellRendererImage, IconviewCursor, IconviewDragSelect, IconviewPanView
 from .core import img2pdf_supported_img, PageAdder, PDFDocError, PDFRenderer
@@ -469,6 +470,7 @@ class PdfArranger(Gtk.Application):
             ('select-same-format', self.on_action_select, 'i'),
             ('about', self.about_dialog),
             ("insert-blank-page", self.insert_blank_page),
+            ("insert-signature", self.insert_signature),
             ("generate-booklet", self.generate_booklet),
             ("split-booklet", self.split_booklet),
             ("preferences", self.on_action_preferences),
@@ -508,6 +510,61 @@ class PdfArranger(Gtk.Application):
                 return
             adder.addpages(file)
             adder.commit(select_added=False, add_to_undomanager=True)
+
+    def insert_signature(self, *_args):
+        from PIL import Image
+
+        model = self.iconview.get_model()
+        selection = self.iconview.get_selected_items()
+        selection.sort()
+
+        # If nothing is selected (e.g. full-page view), apply to all pages
+        if not selection:
+            it = model.get_iter_first()
+            while it:
+                selection.append(model.get_path(it))
+                it = model.iter_next(it)
+
+        if not selection:
+            self.error_message_dialog(_("No pages loaded."))
+            return
+
+        dialog = sig_mod.SignatureDialog(self.window)
+        response = dialog.run()
+        pil_img = None
+        if response == Gtk.ResponseType.OK:
+            pil_img, _ = dialog.get_result()
+        dialog.destroy()
+
+        if pil_img is None:
+            return
+
+        pil_img = pil_img.convert("RGBA")
+
+        # Crop tightly to ink content so there is more room to drag in the placement dialog
+        pil_img = sig_mod._autocrop_alpha(pil_img)
+
+        # Resize so signature fits within ~300px — combined with 150dpi this gives ~144pt (~2 in)
+        max_w = 300
+        if pil_img.width > max_w:
+            ratio = max_w / pil_img.width
+            pil_img = pil_img.resize((max_w, int(pil_img.height * ratio)), Image.LANCZOS)
+
+        try:
+            sig_pdf = sig_mod.rgba_pil_to_pdf(pil_img, self.tmp_dir)
+        except Exception as e:
+            self.error_message_dialog(_("Failed to build signature PDF: {}").format(str(e)))
+            return
+
+        if sig_pdf is None:
+            self.error_message_dialog(_("Failed to build signature PDF."))
+            return
+
+        data = [(sig_pdf, 1, "Signature", 0, 1.0,
+                 Sides(0, 0, 0, 0), Sides(0, 0, 0, 0), [])]
+
+        # Open the interactive drag-to-place dialog
+        self.paste_as_layer_dialog(data, selection, 'OVERLAY')
 
     def generate_booklet(self, _action, _option, _unknown):
         selection = self.iconview.get_selected_items()
@@ -839,6 +896,18 @@ class PdfArranger(Gtk.Application):
         searchbar.pack_start(self.searchbar_widget, True, True, 0)
 
         self.window.show_all()
+
+        # View-toggle button: switches between full-page view and thumbnail grid
+        self.view_toggle_btn = Gtk.Button()
+        self.view_toggle_btn.set_focus_on_click(False)
+        self.view_toggle_btn.get_style_context().add_class("image-button")
+        self._view_toggle_icon = Gtk.Image()
+        self.view_toggle_btn.add(self._view_toggle_icon)
+        self.view_toggle_btn.connect("clicked", self._on_view_toggle_clicked)
+        header_bar = self.uiXML.get_object('header_bar')
+        header_bar.pack_end(self.view_toggle_btn)
+        self._update_view_toggle_btn()
+        self.view_toggle_btn.show_all()
 
         # Change iconview color background
         style_context_sw = self.sw.get_style_context()
@@ -2691,6 +2760,7 @@ class PdfArranger(Gtk.Application):
         if self.id_scroll_to_sel:
             GObject.source_remove(self.id_scroll_to_sel)
         self.zoom_fit = False
+        self._update_view_toggle_btn()
         self.quit_rendering()  # For performance reasons
         for row in self.model:
             row[0].zoom = self.zoom_scale
@@ -2737,6 +2807,20 @@ class PdfArranger(Gtk.Application):
     def on_action_zoom_out(self, _action, _param, _unknown):
         self.zoom_set(self.zoom_level - 5)
 
+    def _update_view_toggle_btn(self):
+        """Refresh the view-toggle button icon and tooltip to reflect current zoom_fit state."""
+        if not hasattr(self, 'view_toggle_btn'):
+            return
+        if self.zoom_fit:
+            self._view_toggle_icon.set_from_icon_name("view-grid-symbolic", Gtk.IconSize.BUTTON)
+            self.view_toggle_btn.set_tooltip_text(_("Back to Thumbnails"))
+        else:
+            self._view_toggle_icon.set_from_icon_name("zoom-fit-page-symbolic", Gtk.IconSize.BUTTON)
+            self.view_toggle_btn.set_tooltip_text(_("Full Page View"))
+
+    def _on_view_toggle_clicked(self, _btn):
+        self.on_action_zoom_fit()
+
     def on_action_zoom_fit(self, _action=None, option=0, _unknown=None):
         """Switch between zoom_fit and zoom_set."""
         if len(self.model) == 0:
@@ -2756,6 +2840,7 @@ class PdfArranger(Gtk.Application):
             self.zoom_fit = True
             self.fit_one_page = not bool(option)
             self.zoom_fit_path(path)
+        self._update_view_toggle_btn()
 
     def on_action_fullscreen(self, _action, _param, _unknown):
         """Toggle fullscreen mode."""

@@ -214,6 +214,10 @@ along with PDF Arranger.  If not, see <http://www.gnu.org/licenses/>.
           <attribute name="label" translatable="yes">Insert Blan_k Page…</attribute>
           <attribute name="action">win.insert-blank-page</attribute>
         </item>
+        <item>
+          <attribute name="label" translatable="yes">Insert Si_gnature…</attribute>
+          <attribute name="action">win.insert-signature</attribute>
+        </item>
         <submenu>
           <attribute name="label" translatable="yes">_Booklet</attribute>
           <item>
@@ -515,6 +519,10 @@ along with PDF Arranger.  If not, see <http://www.gnu.org/licenses/>.
       <item>
         <attribute name="label" translatable="yes">Insert Blan_k Page…</attribute>
         <attribute name="action">win.insert-blank-page</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">Insert Si_gnature…</attribute>
+        <attribute name="action">win.insert-signature</attribute>
       </item>
       <submenu>
         <attribute name="label" translatable="yes">_Booklet</attribute>
