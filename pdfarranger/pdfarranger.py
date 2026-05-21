@@ -955,8 +955,6 @@ class PdfArranger(Gtk.Application):
         self.iv_drag_select = IconviewDragSelect(self)
         self.iv_pan_view = IconviewPanView(self)
 
-        if self.config.content_loss_warning():
-            self.content_loss_warning()
 
     @staticmethod
     def get_os_version():
