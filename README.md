@@ -110,6 +110,12 @@ sudo chmod +x /usr/local/bin/pdfarranger
 
 ---
 
+## User Guide
+
+For a full guide on how to use the app (open files, rearrange, crop, insert signatures, keyboard shortcuts), see **[USAGE.md](USAGE.md)**.
+
+---
+
 ## For developers
 
 ```bash
