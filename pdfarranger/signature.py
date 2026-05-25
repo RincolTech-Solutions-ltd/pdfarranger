@@ -11,7 +11,13 @@ import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, Gdk, GdkPixbuf, GLib, Pango
 
-from PIL import Image, ImageDraw, ImageFont, ImageEnhance
+from PIL import Image, ImageDraw, ImageFont
+from pdfarranger.image_utils import (
+    remove_bg as _remove_bg,
+    boost_contrast as _boost_contrast,
+    autocrop_alpha as _autocrop_alpha,
+    rgba_pil_to_pdf,
+)
 
 # ── Persistence ───────────────────────────────────────────────────────────────
 _CONFIG_DIR = Path.home() / ".config" / "pdfarranger"
@@ -492,52 +498,7 @@ class SignatureDialog(Gtk.Dialog):
         return img, None
 
 
-# ── Image helpers ─────────────────────────────────────────────────────────────
-
-def _remove_bg(img: Image.Image, threshold: int = 200) -> Image.Image:
-    """
-    Remove light background using luminosity.
-    Pixels with luminosity > threshold become transparent; darker ink pixels
-    stay opaque with smooth anti-aliased edges.
-    threshold: 0-255 luminosity cutoff (200 = remove near-white, 160 = aggressive).
-    """
-    from PIL import ImageOps
-    img = img.convert("RGBA")
-    r, g, b, _ = img.split()
-    gray = img.convert("L")
-    # Invert: white bg → 0 (transparent), dark ink → 255 (opaque)
-    inverted = ImageOps.invert(gray)
-    cutoff = 255 - threshold
-    def _to_alpha(x):
-        if x <= cutoff:
-            return 0
-        return min(255, round((x - cutoff) * 255 / max(1, 255 - cutoff)))
-    alpha = inverted.point(_to_alpha)
-    return Image.merge("RGBA", (r, g, b, alpha))
-
-
-def _boost_contrast(img: Image.Image) -> Image.Image:
-    """Boost RGB contrast only, leaving alpha untouched."""
-    img = img.convert("RGBA")
-    r, g, b, a = img.split()
-    rgb = Image.merge("RGB", (r, g, b))
-    rgb = ImageEnhance.Contrast(rgb).enhance(3.0)
-    r2, g2, b2 = rgb.split()
-    return Image.merge("RGBA", (r2, g2, b2, a))
-
-
-def _autocrop_alpha(img: Image.Image, margin: int = 8) -> Image.Image:
-    """Crop tightly to the bounding box of non-transparent pixels + small margin."""
-    _, _, _, a = img.split()
-    bbox = a.getbbox()
-    if bbox is None:
-        return img
-    left  = max(0, bbox[0] - margin)
-    top   = max(0, bbox[1] - margin)
-    right = min(img.width,  bbox[2] + margin)
-    bottom= min(img.height, bbox[3] + margin)
-    return img.crop((left, top, right, bottom))
-
+# ── GTK-specific image helper ─────────────────────────────────────────────────
 
 def _pil_to_pixbuf(img: Image.Image, max_w: int, max_h: int) -> GdkPixbuf.Pixbuf:
     from gi.repository import GdkPixbuf as GPB
@@ -550,73 +511,4 @@ def _pil_to_pixbuf(img: Image.Image, max_w: int, max_h: int) -> GdkPixbuf.Pixbuf
     )
 
 
-def rgba_pil_to_pdf(pil_img: Image.Image, tmp_dir: str) -> str:
-    """
-    Convert an RGBA PIL image to a single-page PDF with true transparency.
-    Uses pikepdf with an SMask (soft mask) so the alpha channel is fully
-    preserved when overlaid via add_overlay — no white background.
-    Returns path to the temp PDF file.
-    """
-    import zlib
-    import tempfile
-    import pikepdf
-
-    pil_img = pil_img.convert("RGBA")
-    w, h = pil_img.size
-
-    # Split RGB and alpha channels
-    r, g, b, a = pil_img.split()
-    rgb_img = Image.merge("RGB", (r, g, b))
-
-    # Compress raw pixel data with zlib (FlateDecode)
-    rgb_raw   = zlib.compress(rgb_img.tobytes())
-    alpha_raw = zlib.compress(a.tobytes())
-
-    pdf = pikepdf.Pdf.new()
-
-    # --- Soft mask (alpha channel as DeviceGray image) ---
-    smask = pikepdf.Stream(pdf, alpha_raw)
-    smask["/Type"]             = pikepdf.Name("/XObject")
-    smask["/Subtype"]          = pikepdf.Name("/Image")
-    smask["/Width"]            = w
-    smask["/Height"]           = h
-    smask["/ColorSpace"]       = pikepdf.Name("/DeviceGray")
-    smask["/BitsPerComponent"] = 8
-    smask["/Filter"]           = pikepdf.Name("/FlateDecode")
-    smask_ref = pdf.make_indirect(smask)
-
-    # --- RGB image XObject with SMask for transparency ---
-    img_xobj = pikepdf.Stream(pdf, rgb_raw)
-    img_xobj["/Type"]             = pikepdf.Name("/XObject")
-    img_xobj["/Subtype"]          = pikepdf.Name("/Image")
-    img_xobj["/Width"]            = w
-    img_xobj["/Height"]           = h
-    img_xobj["/ColorSpace"]       = pikepdf.Name("/DeviceRGB")
-    img_xobj["/BitsPerComponent"] = 8
-    img_xobj["/Filter"]           = pikepdf.Name("/FlateDecode")
-    img_xobj["/SMask"]            = smask_ref
-    img_ref = pdf.make_indirect(img_xobj)
-
-    # 150 DPI keeps signatures to ~2 inches wide — easy to position on the page
-    dpi  = 150
-    w_pt = round(w * 72 / dpi, 4)
-    h_pt = round(h * 72 / dpi, 4)
-
-    # Content stream: scale image to fill the page
-    content = f"q {w_pt} 0 0 {h_pt} 0 0 cm /Im1 Do Q".encode()
-
-    # Build page dictionary and wrap in pikepdf.Page (required by PageList)
-    page_dict = pikepdf.Dictionary(
-        Type      = pikepdf.Name.Page,
-        MediaBox  = pikepdf.Array([0, 0, w_pt, h_pt]),
-        Resources = pikepdf.Dictionary(
-            XObject = pikepdf.Dictionary(Im1=img_ref)
-        ),
-        Contents  = pdf.make_stream(content),
-    )
-    pdf.pages.append(pikepdf.Page(pdf.make_indirect(page_dict)))
-
-    tmp = tempfile.NamedTemporaryFile(suffix=".pdf", dir=tmp_dir, delete=False)
-    pdf.save(tmp.name)
-    tmp.close()
-    return tmp.name
+# rgba_pil_to_pdf is imported from pdfarranger.image_utils above.

@@ -24,7 +24,29 @@ It is a front end for [pikepdf](https://github.com/pikepdf/pikepdf).
 
 ## Install on Linux (this fork)
 
-### Option 1 — Clone and install (Ubuntu / Debian / Linux Mint)
+### One-liner install (all distros)
+
+Paste either command into your terminal — it detects your distro, installs dependencies,
+clones the repo, and creates a `pdfarranger` launcher automatically:
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/RincolTech-Solutions-ltd/pdfarranger/main/install.sh)
+```
+
+or with wget:
+
+```bash
+bash <(wget -qO- https://raw.githubusercontent.com/RincolTech-Solutions-ltd/pdfarranger/main/install.sh)
+```
+
+After it finishes, just type `pdfarranger` to launch.
+To update later: `cd ~/pdfarranger && git pull`
+
+---
+
+### Manual install — step by step
+
+#### Option A — Ubuntu / Debian / Linux Mint
 
 ```bash
 # 1. Install system dependencies
